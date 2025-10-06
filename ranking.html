@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Global Air Quality Ranking (AQI)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: "Segoe UI", sans-serif;
+      background: #f7f9fb;
+      margin: 0;
+      padding: 0;
+      text-align: center;
+    }
+    h1 {
+      background: linear-gradient(90deg, #007bff, #0056b3);
+      color: white;
+      margin: 0;
+      padding: 1rem;
+      font-size: 1.6rem;
+    }
+    select, button {
+      padding: 0.6rem 1rem;
+      margin: 1rem;
+      font-size: 1rem;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      cursor: pointer;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+    }
+    table {
+      width: 90%;
+      margin: 1rem auto;
+      border-collapse: collapse;
+      background: white;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    th, td {
+      padding: 0.7rem;
+      border-bottom: 1px solid #ddd;
+    }
+    th {
+      background: #007bff;
+      color: white;
+    }
+    tr:hover {
+      background: #f0f8ff;
+    }
+    .aqi-badge {
+      font-weight: bold;
+      padding: 3px 8px;
+      border-radius: 5px;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <h1>🌍 Global Air Quality Ranking (AQI)</h1>
+
+  <label for="continentSelect">Filter by continent:</label>
+  <select id="continentSelect">
+    <option value="world">🌎 Global</option>
+    <option value="southamerica">South America</option>
+    <option value="northamerica">North America</option>
+    <option value="europe">Europa</option>
+    <option value="asia">Asia</option>
+    <option value="africa">Africa</option>
+    <option value="oceania">Oceania</option>
+  </select>
+
+  <button id="loadBtn">Refresh</button>
+
+  <table id="rankingTable">
+    <thead>
+      <tr>
+        <th>Position</th>
+        <th>City / Station</th>
+        <th>AQI</th>
+        <th>Categorie</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="4">Loading global ranking...</td></tr>
+    </tbody>
+  </table>
+
+  <script>
+    const token = "090ca286c1bb00d992871976d77c05b6347a17d1";
+
+    const continentBounds = {
+      world: [-85, -180, 85, 180],
+      southamerica: [-56, -82, 13, -34],
+      northamerica: [5, -168, 83, -52],
+      europe: [34, -25, 72, 45],
+      asia: [-10, 25, 81, 180],
+      africa: [-35, -18, 37, 52],
+      oceania: [-50, 110, 0, 180],
+    };
+
+    const tableBody = document.querySelector("#rankingTable tbody");
+    const continentSelect = document.getElementById("continentSelect");
+    const loadBtn = document.getElementById("loadBtn");
+
+    function getAQIColor(aqi) {
+      if (aqi <= 50) return "#009966";
+      if (aqi <= 100) return "#ffde33";
+      if (aqi <= 150) return "#ff9933";
+      if (aqi <= 200) return "#cc0033";
+      if (aqi <= 300) return "#660099";
+      return "#7e0023";
+    }
+
+    function getAQICategory(aqi) {
+      if (aqi <= 50) return "Good";
+      if (aqi <= 100) return "Moderate";
+      if (aqi <= 150) return "Unhealthy for Sensitive Groups";
+      if (aqi <= 200) return "Unhealthy";
+      if (aqi <= 300) return "Very Unhealthy";
+      return "Hazardous";
+    }
+
+    async function loadAQI(continent) {
+      const bounds = continentBounds[continent];
+      const url = `https://api.waqi.info/map/bounds/?token=${token}&latlng=${bounds.join(",")}`;
+
+      tableBody.innerHTML = `<tr><td colspan="4">Loading data: ${continent === "world" ? "Worldwide" : continent}...</td></tr>`;
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (data.status !== "ok" || !data.data.length) {
+          tableBody.innerHTML = `<tr><td colspan="4">No stations found.</td></tr>`;
+          return;
+        }
+
+        const stations = data.data
+          .filter(st => !isNaN(st.aqi))
+          .sort((a, b) => b.aqi - a.aqi);
+
+        tableBody.innerHTML = "";
+        stations.forEach((st, i) => {
+          const color = getAQIColor(st.aqi);
+          const category = getAQICategory(st.aqi);
+          tableBody.innerHTML += `
+            <tr>
+              <td>${i + 1}</td>
+              <td>${st.station?.name || "Unknown"}</td>
+              <td><span class="aqi-badge" style="background:${color}">${st.aqi}</span></td>
+              <td style="color:${color}; font-weight:bold;">${category}</td>
+            </tr>`;
+        });
+      } catch (err) {
+        console.error(err);
+        tableBody.innerHTML = `<tr><td colspan="4">Error loading data. Please try again.</td></tr>`;
+      }
+    }
+
+    window.addEventListener("load", () => loadAQI("world"));
+    loadBtn.addEventListener("click", () => loadAQI(continentSelect.value));
+  </script>
+</body>
+</html>
+
