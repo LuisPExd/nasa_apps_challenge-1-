@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Air Quality Dashboard: NASA Space Apps</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <!-- Tailwind CSS CDN for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for Leaflet and layout */
+        html, body, #map { height:100%; margin:0; padding:0; font-family: 'Inter', sans-serif; }
+        
+        /* Map container takes remaining space */
+        .map-container { flex-grow: 1; position: relative; }
+
+        /* General styles for buttons and selectors */
+        .custom-control {
+            background: white; border: none; border-radius: 8px;
+            font-family: inherit; padding: 10px 15px; cursor: pointer;
+            font-size: 14px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            transition: all 0.2s ease;
+        }
+        .custom-control:hover { background: #f0f0f0; box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
+
+        /* AQI Level Colors (for the dashboard background) */
+        .aqi-good { background-color: #4ade80; color: #166534; } /* Green */
+        .aqi-moderate { background-color: #fcd34d; color: #92400e; } /* Yellow */
+        .aqi-unhealthy-sensitive { background-color: #fb923c; color: #9a3412; } /* Orange */
+        .aqi-unhealthy { background-color: #f87171; color: #991b1b; } /* Red */
+        .aqi-very-unhealthy { background-color: #a78bfa; color: #4c1d95; } /* Purple */
+        .aqi-hazardous { background-color: #e879f9; color: #86198f; } /* Violet */
+
+        /* TEMPO Panel styles (New: top right, fixed position, uses Tailwind) */
+        .indicators-panel {
+            position:absolute; top:15px; right:15px; width:360px;
+            max-width: 90%; max-height:90%; overflow:hidden; /* Overflow handled by tabs */
+            background:white; border-radius:12px;
+            box-shadow:0 8px 25px rgba(0,0,0,0.3); 
+            z-index:1100; 
+            display: flex; /* Flex container for the panel content */
+            flex-direction: column;
+        }
+
+        /* Active tab style */
+        .tab-active {
+            border-bottom: 2px solid #4f46e5; /* Indigo-600 */
+            color: #4f46e5;
+            font-weight: 600;
+        }
+
+        /* Content area for tabs to handle scroll */
+        .tab-content-area {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+        
+        /* Custom Leaflet Marker for AQI */
+        .aqi-icon-container {
+            border: none;
+            background: none;
+        }
+    </style>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+    <div class="flex h-screen bg-gray-50">
+        <!-- Dashboard Panel (Left) -->
+        <div id="dashboardPanel" class="w-full md:w-96 p-4 md:p-6 bg-white shadow-xl flex flex-col space-y-4 overflow-y-auto">
+            <h1 class="text-3xl font-bold text-gray-800">Cleaner Skies: NASA Data to Action</h1>
+            <p class="text-sm text-gray-600">This project uses <b>TEMPO</b> and <b>AQICN</b> data to offer information and actions about local air quality.</p>
+            
+            <!-- AQI Status Card (Actual) -->
+            <div id="aqiStatusCard" class="rounded-xl p-5 shadow-lg transition-all duration-300 aqi-good text-white">
+                <p class="text-sm font-semibold mb-1">Your Local Air Quality (Current AQI)</p>
+                <div class="flex items-center justify-between">
+                    <span id="aqiValue" class="text-5xl font-extrabold">--</span>
+                    <span id="aqiCategory" class="text-lg font-medium">Loading...</span>
+                </div>
+                <hr class="my-3 border-white/50">
+                <p id="aqiRecommendation" class="text-base font-medium">Health Recommendation: Locating...</p>
+                <small id="aqiSource" class="block mt-2 text-white/80">Source: Nearest Station (AQICN)</small>
+            </div>
+
+            <!-- Predicted AQI Status Card (New: Action Focus) -->
+            <div id="aqiPredictionCard" class="rounded-xl p-5 shadow-lg bg-indigo-50 border border-indigo-200 text-gray-800">
+                <p class="text-sm font-semibold mb-1 flex items-center">
+                    <svg class="w-4 h-4 mr-1 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    Prediction (Next 6h)
+                </p>
+                <div class="flex items-center justify-between">
+                    <span id="predictedAqiValue" class="text-3xl font-extrabold text-indigo-700">--</span>
+                    <span id="predictedAqiCategory" class="text-md font-medium">Evaluating...</span>
+                </div>
+                <p id="predictedAqiAction" class="text-sm mt-2 font-medium">Action Plan: Waiting for data...</p>
+            </div>
+
+
+            <!-- Action Section -->
+            <div class="space-y-3">
+                <h3 class="text-xl font-semibold text-gray-800 border-b pb-2">Action & Layers</h3>
+                <button id="locateMeBtn" class="w-full custom-control bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.828 0l-4.243-4.243m4.243-4.243l-4.243-4.243m4.243 4.243l4.243 4.243m-4.243 4.243l4.243 4.243m-4.243 4.243l4.243 4.243"></path></svg>
+                    Center on My Location
+                </button>
+                <button id="indicatorsBtn" class="w-full custom-control bg-indigo-500 hover:bg-indigo-600 text-white flex items-center justify-center">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L18 20M4 16l-.086-.086a2 2 0 010-2.828l6.172-6.172a2 2 0 012.828 0L18 20"></path></svg>
+                    View TEMPO/NASA Layers
+                </button>
+            </div>
+
+            <!-- Satellite Date Control -->
+            <div class="pt-4 border-t border-gray-200">
+                <label for="datePicker" class="text-sm font-medium block mb-2">Satellite Image Date (MODIS/VIIRS):</label>
+                <input type="date" id="datePicker" class="w-full custom-control" title="Select date for satellite layer"/>
+                <button class="w-full custom-control mt-2 bg-gray-200 hover:bg-gray-300" id="toggleBtn">Switch to Street Map</button>
+            </div>
+
+             <!-- Status Bar (Small and discreet) -->
+            <div id="statusBar" class="p-3 mt-4 text-center text-sm rounded-lg bg-gray-100 text-gray-600 transition-opacity duration-300">
+                Starting application...
+            </div>
+        </div>
+        
+        <!-- Map Container (Right) -->
+        <div class="map-container">
+            <div id="map" class="h-full w-full"></div>
+
+            <!-- TEMPO Indicators Panel (Hidden by default, opens via button) -->
+            <div class="indicators-panel hidden" id="indicatorsPanel">
+                
+                <!-- Tab Navigation -->
+                <div class="flex border-b border-gray-200 bg-gray-50 p-2">
+                    <button class="flex-1 py-2 px-4 text-sm text-gray-600 transition duration-150 ease-in-out tab-active" data-tab="layers">Layers (Pollutants)</button>
+                    <button class="flex-1 py-2 px-4 text-sm text-gray-600 transition duration-150 ease-in-out" data-tab="animation">Time Animation</button>
+                    <button class="ml-auto bg-gray-200 hover:bg-gray-300 rounded-full w-8 h-8 font-bold text-gray-700 transition" id="closeIndicators">×</button>
+                </div>
+
+                <!-- Tab Content Area -->
+                <div class="tab-content-area">
+                    
+                    <!-- Capas Tab Content -->
+                    <div id="tab-layers" data-content="layers">
+                        <h4 class="text-lg font-bold mb-3">📡 TEMPO Atmospheric Indicators</h4>
+                        
+                        <label for="tempoTimestamp" class="block text-sm font-medium mb-1">🕒 Select Time (ISO):</label>
+                        <select id="tempoTimestamp" class="w-full custom-control mb-3">
+                            <option value="">Select an indicator first</option>
+                        </select>
+
+                        <div id="indicatorsList" class="space-y-2 border-b pb-3"></div>
+
+                        <div class="legends-container pt-3 space-y-3" id="legendsContainer"></div>
+                    </div>
+                    
+                    <!-- Animación Tab Content -->
+                    <div id="tab-animation" data-content="animation" class="hidden">
+                        <h4 class="text-lg font-bold mb-3">⚡ Time Animation (TEMPO)</h4>
+                        
+                        <div class="p-3 bg-indigo-50 border border-indigo-200 rounded-lg mb-4 text-sm text-indigo-700">
+                            <b>Tip:</b> First select a layer in the "Layers" tab so that data is available for animation.
+                        </div>
+
+                        <label class="text-sm font-medium block">Start Time:</label>
+                        <select id="tempoStart" class="w-full custom-control mb-2"></select>
+                        <label class="text-sm font-medium block">End Time:</label>
+                        <select id="tempoEnd" class="w-full custom-control mb-4"></select>
+                        <div class="flex gap-2">
+                            <button id="startTempoAnim" class="flex-1 custom-control bg-green-600 text-white">▶️ Start Animation</button>
+                            <button id="stopTempoAnim" class="flex-1 custom-control bg-red-600 text-white" disabled>⏹️ Stop</button>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+    (async function() {
+        // AQICN Token (Hardcoded for demonstration - IMPORTANT: Use a secure method in production)
+        const AQICN_TOKEN = "090ca286c1bb00d992871976d77c05b6347a17d1"; 
+        
+        // --- VISUALIZATION CONSTANTS ---
+        // Low zoom level: Shows 5 main stations. Ideal for continental/global view.
+        const LOW_ZOOM_THRESHOLD = 8; 
+        // High zoom level: Shows ALL detailed stations. Ideal for urban view.
+        const HIGH_ZOOM_THRESHOLD = 11; 
+        // Number of stations to show at low zoom (LOW_ZOOM)
+        const MIN_STATIONS_LOW_ZOOM = 5;
+
+        // UTILS
+        function formatLocalDate(d){
+            const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+            return `${y}-${m}-${day}`;
+        }
+
+        /** Shows a temporary message in the lower status bar */
+        function showStatusMessage(message, isError = false) {
+            const bar = document.getElementById("statusBar");
+            bar.textContent = message;
+            bar.className = `p-3 mt-4 text-center text-sm rounded-lg transition-opacity duration-300 ${
+                isError ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'
+            }`;
+            clearTimeout(bar.timer);
+            bar.timer = setTimeout(() => {
+                bar.textContent = 'Awaiting command...';
+                bar.className = 'p-3 mt-4 text-center text-sm rounded-lg transition-opacity duration-300 bg-gray-100 text-gray-600';
+            }, 8000);
+        }
+
+        // MAP INITIALIZATION
+        const defaultCenter = [40.730610, -73.935242]; // Default: New York (as a neutral fallback)
+        const map = L.map("map", { 
+            center: defaultCenter, 
+            zoom: 10, 
+            zoomControl: false
+        });
+        L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+        // UI Element References
+        const datePicker = document.getElementById("datePicker");
+        const toggleBtn = document.getElementById("toggleBtn");
+        const indicatorsBtn = document.getElementById("indicatorsBtn");
+        const indicatorsPanel = document.getElementById("indicatorsPanel");
+        const closeIndicators = document.getElementById("closeIndicators");
+        const locateMeBtn = document.getElementById("locateMeBtn");
+        
+        // AQI Dashboard References
+        const aqiStatusCard = document.getElementById("aqiStatusCard");
+        const aqiValueEl = document.getElementById("aqiValue");
+        const aqiCategoryEl = document.getElementById("aqiCategory");
+        const aqiRecommendationEl = document.getElementById("aqiRecommendation");
+        const aqiSourceEl = document.getElementById("aqiSource");
+
+        // Prediction References (NEW)
+        const predictedAqiValueEl = document.getElementById("predictedAqiValue");
+        const predictedAqiCategoryEl = document.getElementById("predictedAqiCategory");
+        const predictedAqiActionEl = document.getElementById("predictedAqiAction");
+
+        // TEMPO References
+        const timestampSelect = document.getElementById("tempoTimestamp");
+        const tempoStart = document.getElementById("tempoStart");
+        const tempoEnd = document.getElementById("tempoEnd");
+        const startTempoAnim = document.getElementById("startTempoAnim");
+        const stopTempoAnim = document.getElementById("stopTempoAnim");
+        const indicatorsList = document.getElementById("indicatorsList");
+        const legendsContainer = document.getElementById("legendsContainer");
+
+        const todayStr = formatLocalDate(new Date());
+        const hour = new Date().getHours();
+        
+        let userLocationMarker = null;
+        let aqiMarkersLayer = L.layerGroup().addTo(map); // Layer group for AQI markers
+        let currentAQI = 0; // Stores the latest calculated AQI
+
+        // =========================================================
+        // === 1. AQI LOGIC (Dashboard Update & Filtering) ===
+        // =========================================================
+
+        /** Returns the AQI category, color class, and health recommendation */
+        function getAQIInfo(aqi) {
+            if (aqi === 'N/A' || isNaN(parseInt(aqi))) return { category: "No Data", class: "bg-gray-400", color: "text-gray-800", rec: "No AQI monitoring data found. Try another area." };
+            aqi = parseInt(aqi);
+            if (aqi > 300) return { category: "Hazardous", class: "aqi-hazardous", color: "text-purple-600", rec: "Emergency! Avoid physical activity. Stay indoors and use a purifier." };
+            if (aqi > 200) return { category: "Very Unhealthy", class: "aqi-very-unhealthy", color: "text-purple-600", rec: "Health alert. Avoid all outdoor activity." };
+            if (aqi > 150) return { category: "Unhealthy", class: "aqi-unhealthy", color: "text-red-600", rec: "Everyone: Avoid prolonged or heavy outdoor exertion. Close windows." };
+            if (aqi > 100) return { category: "Unhealthy (Sensitive)", class: "aqi-unhealthy-sensitive", color: "text-orange-600", rec: "Sensitive groups (children, asthma): Limit time and exercise outdoors." };
+            if (aqi > 50) return { category: "Moderate", class: "aqi-moderate", color: "text-yellow-700", rec: "Acceptable for most. Sensitive: Avoid prolonged outdoor exertion." };
+            return { category: "Good", class: "aqi-good", color: "text-green-600", rec: "Enjoy the outdoors without restrictions! It's a clean day." };
+        }
+
+        /** Updates the AQI visual dashboard */
+        function updateAQIDashboard(aqi, stationName = "Local Station") {
+            const info = getAQIInfo(aqi);
+            currentAQI = aqi;
+
+            // Update card appearance
+            aqiStatusCard.className = `rounded-xl p-5 shadow-lg transition-all duration-300 text-white ${info.class}`;
+
+            // Update content (ensure <b> tags work)
+            aqiValueEl.textContent = aqi;
+            aqiCategoryEl.textContent = info.category;
+            aqiRecommendationEl.textContent = `${info.rec}`;
+            aqiSourceEl.textContent = `Source: ${stationName} (AQICN)`;
+
+            // Trigger Prediction Update after dashboard updates
+            updatePredictionDashboard(aqi);
+        }
+
+        /** "Prediction" Function (Mock-up, but based on real action) */
+        function updatePredictionDashboard(currentAqi) {
+            if (currentAqi === 'N/A' || isNaN(parseInt(currentAqi))) {
+                predictedAqiValueEl.textContent = '--';
+                predictedAqiCategoryEl.textContent = 'No Data';
+                predictedAqiActionEl.textContent = 'Load current AQI first.';
+                return;
+            }
+
+            const aqi = parseInt(currentAqi);
+            let predictedAqi = aqi; // Simulation: starts the same
+            let actionMessage = '';
+
+            // Simple "prediction" logic for the demo:
+            // If AQI is moderate or worse, there's a 40% chance it goes up by 20 points.
+            if (aqi > 50 && Math.random() < 0.4) {
+                predictedAqi = aqi + Math.floor(Math.random() * 20) + 10; 
+                actionMessage = 'A slight <b>deterioration</b> is expected. Prepare preventive actions.';
+            } else if (aqi > 50 && Math.random() < 0.6) {
+                predictedAqi = aqi - Math.floor(Math.random() * 15);
+                actionMessage = 'A slight <b>improvement</b> is expected. Stay alert, but plan outdoor activities.';
+            } else {
+                 actionMessage = 'Air quality is expected to <b>remain stable</b>.';
+            }
+            
+            // Ensure it doesn't drop below 1
+            predictedAqi = Math.max(1, predictedAqi);
+
+            const info = getAQIInfo(predictedAqi);
+            
+            predictedAqiValueEl.textContent = predictedAqi;
+            predictedAqiCategoryEl.textContent = info.category;
+            // Use innerHTML to render the <b> tag correctly
+            predictedAqiActionEl.innerHTML = `<b>Action:</b> ${actionMessage} Recommendation: ${info.rec}`;
+        }
+
+
+        /** Creates a stylized Leaflet marker for AQI */
+        function createAQIIcon(aqi) {
+            const info = getAQIInfo(aqi);
+            const aqiValueDisplay = aqi === 'N/A' ? '?' : aqi;
+            return L.divIcon({
+                className: 'aqi-icon-container',
+                html: `<div class="p-1 rounded-full text-xs font-bold shadow-lg text-center ${info.class} border-2 border-white text-gray-800">${aqiValueDisplay}</div>`,
+                iconSize: [40, 40],
+                iconAnchor: [20, 20]
+            });
+        }
+        
+        /** Loads AQICN markers for the current map bounds */
+        function loadAQICNMonitoring(map) {
+            const bounds = map.getBounds();
+            const boundsString = `${bounds.getNorth()},${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()}`;
+            const currentZoom = map.getZoom();
+            
+            const isZoomedHigh = currentZoom >= HIGH_ZOOM_THRESHOLD; // Show ALL detailed stations
+            const isZoomedLow = currentZoom >= LOW_ZOOM_THRESHOLD; // Show main stations (5 minimum)
+
+            showStatusMessage(`Loading AQI monitoring points (Zoom: ${currentZoom})...`);
+            aqiMarkersLayer.clearLayers();
+            
+            let nearestStation = null;
+            let minDistance = Infinity;
+            const mapCenter = map.getCenter();
+
+            fetch(`https://api.waqi.info/v2/map/bounds/?latlng=${boundsString}&token=${AQICN_TOKEN}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status !== "ok" || data.data.length === 0) {
+                        showStatusMessage("No AQI stations found in this area.", true);
+                        updateAQIDashboard('N/A', "Data Not Available");
+                        return;
+                    }
+
+                    // 1. Find the nearest station to the map center to update the dashboard
+                    data.data.forEach(station => {
+                        const stationLatLng = L.latLng(station.lat, station.lon);
+                        const distance = mapCenter.distanceTo(stationLatLng);
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            nearestStation = station;
+                        }
+                    });
+
+                    if (nearestStation) {
+                        const nearestAqi = nearestStation.aqi === '-' ? 'N/A' : parseInt(nearestStation.aqi);
+                        updateAQIDashboard(nearestAqi, nearestStation.station.name);
+                    }
+                    
+                    // 2. Marker visualization logic
+                    const allStations = data.data.filter(s => s.aqi !== '-' && s.aqi !== 'N/A');
+                    let stationsToShow = [];
+
+                    if (isZoomedHigh) {
+                        // Level 3: Show all stations
+                        stationsToShow = allStations;
+                        showStatusMessage(`Detailed View: ${allStations.length} AQI stations loaded (Zoom $\ge$ ${HIGH_ZOOM_THRESHOLD}).`);
+                    } else if (isZoomedLow) {
+                        // Level 2: Show main stations (the 5 with the worst AQI as proxy for importance)
+                        // Sort by descending AQI and take the first MIN_STATIONS_LOW_ZOOM
+                        stationsToShow = allStations
+                            .sort((a, b) => parseInt(b.aqi) - parseInt(a.aqi))
+                            .slice(0, MIN_STATIONS_LOW_ZOOM);
+                        showStatusMessage(`Improved General View: Showing the ${stationsToShow.length} main stations (Zoom ${LOW_ZOOM_THRESHOLD} to ${HIGH_ZOOM_THRESHOLD-1}). Zoom in for all.`);
+                    } else {
+                        // Level 1: Show only the nearest station (or a message in the center position)
+                        if (nearestStation) {
+                            stationsToShow = [nearestStation];
+                            showStatusMessage(`Global View (Zoom < ${LOW_ZOOM_THRESHOLD}): Showing 1 main station. Zoom in to see more.`);
+                        }
+                    }
+
+                    // 3. Render the selected markers
+                    stationsToShow.forEach(station => {
+                        const aqi = parseInt(station.aqi);
+                        const icon = createAQIIcon(aqi);
+
+                        const marker = L.marker([station.lat, station.lon], { icon }).addTo(aqiMarkersLayer);
+
+                        marker.bindPopup(`
+                            <div class="font-sans text-sm p-1">
+                                <b>📍 ${station.station.name}</b><br>
+                                AQI: <span class="text-lg font-bold ${getAQIInfo(aqi).color}">${aqi}</span><br>
+                                <small>${isZoomedHigh ? 'Detailed Station' : 'Main Station'}</small>
+                            </div>
+                        `);
+                    });
+
+                })
+                .catch(err => { 
+                    console.error("AQICN Error:", err); 
+                    showStatusMessage("Error loading AQI data. Check your token or connection.", true);
+                    updateAQIDashboard('N/A', "Connection Error");
+                });
+        }
+
+        // =========================================================
+        // === 2. GEOLOCATION AND MAP SETUP ===
+        // =========================================================
+
+        /** Attempts to locate the user using browser geolocation */
+        function locateUser(recenterMap = true) {
+            if (!("geolocation" in navigator)) {
+                showStatusMessage("Geolocation is not supported by your browser.", true);
+                return;
+            }
+            
+            showStatusMessage("Finding your location...");
+
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const userLatLng = [position.coords.latitude, position.coords.longitude];
+                    
+                    if (recenterMap) {
+                        map.setView(userLatLng, 12); // Zoom closer
+                    }
+                    
+                    // Remove old marker
+                    if (userLocationMarker) {
+                        map.removeLayer(userLocationMarker);
+                    }
+                    
+                    // Add new stylized user marker (Pulsing blue dot)
+                    userLocationMarker = L.circleMarker(userLatLng, {
+                        radius: 8,
+                        fillColor: "#3b82f6", // Blue-500
+                        color: "#ffffff",
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 1
+                    }).addTo(map);
+
+                    userLocationMarker.bindPopup("<b>You Are Here!</b>").openPopup();
+                    
+                    // Trigger the AQI load
+                    loadAQICNMonitoring(map);
+
+                },
+                (error) => {
+                    showStatusMessage("Location access denied or unavailable. Centering on default location.", true);
+                    map.setView(defaultCenter, 6);
+                    // Still try to load AQI for the default center
+                    loadAQICNMonitoring(map); 
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
+        // Event listener for Locate Me button
+        locateMeBtn.addEventListener("click", () => {
+            locateUser(true); 
+        });
+
+        // Initial Map Layers (NASA GIBS and OSM)
+        function createLayers(dateStr){
+            const modis = L.tileLayer(
+                `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${dateStr}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpeg`,
+                { maxZoom:9, attribution:"NASA MODIS Terra" }
+            );
+            const viirs = L.tileLayer(
+                `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_DayNightBand_At_Sensor_Radiance/default/${dateStr}/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png`,
+                { maxZoom:8, attribution:"NASA VIIRS" }
+            );
+            return { modis, viirs };
+        }
+
+        let { modis, viirs } = createLayers(todayStr);
+        const streets = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19, attribution: '© OpenStreetMap contributors'});
+        
+        let satelliteLayer = (hour >= 6 && hour < 18) ? modis : viirs;
+        let showingStreets = false; // Start with satellite map to show NASA data immediately
+        satelliteLayer.addTo(map);
+
+        datePicker.value = todayStr;
+        datePicker.max = todayStr;
+
+        toggleBtn.addEventListener("click", () => {
+            if(!showingStreets){
+                map.removeLayer(satelliteLayer);
+                map.addLayer(streets);
+                toggleBtn.textContent="Switch to Satellite Map";
+                showingStreets=true;
+            } else {
+                map.removeLayer(streets);
+                map.addLayer(satelliteLayer);
+                toggleBtn.textContent="Switch to Street Map";
+                showingStreets=false;
+            }
+        });
+
+        datePicker.addEventListener("change", () => {
+            if(datePicker.value) {
+                const newLayers = createLayers(datePicker.value);
+                // Simple assumption: use MODIS for daytime (6h-18h), VIIRS otherwise.
+                const nextLayer = (hour >= 6 && hour < 18) ? newLayers.modis : newLayers.viirs;
+                
+                if(map.hasLayer(satelliteLayer)) map.removeLayer(satelliteLayer);
+                satelliteLayer = nextLayer;
+                if(!showingStreets) map.addLayer(satelliteLayer);
+            }
+        });
+
+        // Add a listener to reload AQI when the user moves or zooms the map
+        map.on('moveend', () => {
+            // Only reload if the TEMPO animation is stopped
+            if (tempoTimer === null) { 
+                loadAQICNMonitoring(map);
+            }
+        });
+        
+        // Initial call to locate user
+        locateUser(true); 
+
+        // =========================================================
+        // === 3. TEMPO Indicator Logic (With Tabs) ===
+        // =========================================================
+        
+        // GEOS-5 Aerosol Optical Depth (AOD) added as a predictive/complementary layer
+        const validIndicators = [
+            { id:"TEMPO_L3_Formaldehyde_Vertical_Column", name:"Formaldehyde ($CH_2O$)", legend:"https://gibs.earthdata.nasa.gov/legends/TEMPO_HCHO_Vertical_Column_H.svg", isTempo: true },
+            { id:"TEMPO_L3_NO2_Vertical_Column_Troposphere", name:"Nitrogen Dioxide ($NO_2$)", legend:"https://gibs.earthdata.nasa.gov/legends/TEMPO_NO2_Vertical_Column_Troposphere_H.svg", isTempo: true },
+            { id:"TEMPO_L3_Ozone_Profile_Troposphere_Column", name:"Tropospheric Ozone ($O_3$)", legend:"https://gibs.earthdata.nasa.gov/legends/TEMPO_Troposphere_Ozone_Column_H.svg", isTempo: true },
+            { id:"GEOS_5_Aerosol_Optical_Depth_550nm", name:"Aerosol Optical Depth (GEOS-5)", legend:"https://gibs.earthdata.nasa.gov/legends/GEOS_5_Aerosol_Optical_Depth_550nm.svg", isTempo: false, isPrediction: true },
+        ];
+
+        let indicatorLayers = {};
+        let selectedIso = null;
+        let tempoTimes = [];
+        let tempoTimer = null;
+
+        // --- Tab Control Logic ---
+        const tabButtons = indicatorsPanel.querySelectorAll('[data-tab]');
+        const tabContents = indicatorsPanel.querySelectorAll('[data-content]');
+
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const targetTab = button.getAttribute('data-tab');
+
+                // Update button active state
+                tabButtons.forEach(btn => btn.classList.remove('tab-active'));
+                button.classList.add('tab-active');
+
+                // Switch content
+                tabContents.forEach(content => {
+                    if (content.getAttribute('data-content') === targetTab) {
+                        content.classList.remove('hidden');
+                    } else {
+                        content.classList.add('hidden');
+                    }
+                });
+            });
+        });
+
+        /** Gets available times (ISO strings) for a GIBS/WMTS layer */
+        async function loadTimesForLayer(layerId){
+            try {
+                // Search only in the "best" layer for TEMPO
+                const url = "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/1.0.0/WMTSCapabilities.xml";
+                
+                const res = await fetch(url);
+                const text = await res.text();
+                const xml = new DOMParser().parseFromString(text, "application/xml");
+                
+                // Use querySelector to find the Layer node by its ID
+                const node = [...xml.querySelectorAll("Layer")].find(l => {
+                    const idNode = l.querySelector("ows\\:Identifier, Identifier");
+                    return idNode && idNode.textContent.trim() === layerId;
+                });
+
+                if(!node) {
+                    // For non-TEMPO layers (e.g., GEOS-5), the node might not be in 'best' 
+                    // If it's not TEMPO and not found, return a default time (today)
+                    if (!validIndicators.find(i => i.id === layerId)?.isTempo) {
+                         // Use today's date for daily layers like GEOS-5
+                        return [todayStr];
+                    }
+                    return [];
+                }
+
+                // Extract the time/dimension values
+                const dim = node.querySelector("Dimension, ows\\:Dimension");
+                if(!dim) return [];
+                const values = [...dim.querySelectorAll("Value")]
+                    .map(v => {
+                        // Clean the string to get only the ISO Time
+                        const match = v.textContent.match(/^([^/]+)/);
+                        return match ? match[1] : null;
+                    })
+                    .filter(Boolean);
+                return values;
+            } catch(e){ console.error("Error loading GIBS times for layer:", layerId, e); return []; }
+        }
+
+        /** Fills the time selectors and determines the most recent time */
+        async function updateTimestampSelectorFor(layerId){
+            timestampSelect.innerHTML='<option>Loading...</option>';
+            tempoStart.innerHTML=""; tempoEnd.innerHTML="";
+            const times = await loadTimesForLayer(layerId);
+            
+            // Check if it is a TEMPO layer with multiple times
+            const isTempoLayer = validIndicators.find(i => i.id === layerId)?.isTempo;
+            
+            if(!isTempoLayer){
+                tempoTimes = times.sort().filter(t => t.length > 10); // Ensure it's an ISO hour (not just date)
+            } else {
+                tempoTimes = times.sort(); 
+            }
+            
+            timestampSelect.innerHTML="";
+            
+            if(tempoTimes.length===0){
+                timestampSelect.innerHTML='<option value="">No times available</option>';
+                return;
+            }
+            
+            tempoTimes.forEach(t=>{
+                // Only fill animation selectors if it's a TEMPO layer with multiple times
+                if(isTempoLayer){
+                    const o=document.createElement("option");
+                    o.value=t; o.textContent=t.replace('T', ' ').replace('Z', ' UTC'); 
+                    timestampSelect.appendChild(o);
+                    
+                    const a=document.createElement("option");
+                    a.value=t; a.textContent=t.replace('T', ' ').replace('Z', ' UTC');
+                    tempoStart.appendChild(a.cloneNode(true));
+                    tempoEnd.appendChild(a);
+                } else {
+                    // For daily layers (like GEOS-5 AOD) only show the date
+                    timestampSelect.innerHTML=`<option value="${t}">${t} (Daily Layer)</option>`;
+                }
+            });
+            
+            // Set the most recent time as default value
+            selectedIso = tempoTimes[tempoTimes.length-1];
+            timestampSelect.value = selectedIso;
+            
+            if(isTempoLayer){
+                tempoStart.value=tempoTimes[0];
+                tempoEnd.value=tempoTimes[tempoTimes.length-1];
+            }
+        }
+
+        /** Adds a visual legend to the panel */
+        function addLegend(id,url,name){
+            const div=document.createElement("div");
+            div.className="p-2 border rounded-lg shadow-sm bg-gray-50";
+            div.id=`legend_${id}`;
+            // Use $ for LaTeX rendering. This applies only for visualization, not the engine
+            const title = name.replace(/\$(.*?)\$/, (match, p1) => `<span class="font-mono">${p1}</span>`); 
+            div.innerHTML=`<h5 class="text-sm font-semibold">${title}</h5><img src="${url}" alt="${name}" class="w-full mt-1 rounded">`;
+            legendsContainer.appendChild(div);
+        }
+
+        /** Removes a legend from the panel */
+        function removeLegend(id){
+            const el=document.getElementById(`legend_${id}`);
+            if(el) el.remove();
+        }
+
+        // Generation of the indicator list
+        validIndicators.forEach(ind=>{
+            const div=document.createElement("div");
+            div.className="p-2 border rounded-lg hover:bg-gray-50 transition";
+            
+            // Use $ for LaTeX rendering
+            const displayName = ind.name.replace(/\$(.*?)\$/, (match, p1) => `<span class="font-mono">${p1}</span>`);
+
+            div.innerHTML=`<label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="checkbox" id="${ind.id}" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"> 
+                            <span class="text-sm font-medium">${displayName}</span>
+                        </label>
+                        <div class="text-xs text-gray-500 ml-6">GIBS Layer: ${ind.isPrediction ? 'PREDICTION' : (ind.isTempo ? 'TEMPO' : 'DAILY')}</div>`;
+            indicatorsList.appendChild(div);
+            const checkbox=div.querySelector("input");
+            
+            checkbox.addEventListener("change", async e=>{
+                const id=ind.id;
+                
+                if(e.target.checked){
+                    showStatusMessage(`Loading times for ${ind.name}...`);
+                    await updateTimestampSelectorFor(ind.id);
+                    if(!selectedIso){
+                        showStatusMessage("No recent data for this layer.", true); 
+                        e.target.checked = false; 
+                        return;
+                    }
+                    
+                    // Zoom level adjusted: TEMPO/GEOS-5 (Level7 maxZoom: 9), base (Level9 maxZoom: 9)
+                    const maxZoom = ind.isTempo ? 9 : 8; 
+                    const attribution = ind.isPrediction ? "NASA GIBS - GEOS-5/Prediction" : "NASA GIBS - TEMPO";
+
+                    indicatorLayers[id] = L.tileLayer(
+                        `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${id}/default/${selectedIso}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png`,
+                        { maxZoom:maxZoom, opacity:0.8, attribution: attribution }
+                    ).addTo(map);
+                    addLegend(id, ind.legend, ind.name);
+                    showStatusMessage(`Layer ${ind.name} activated.`);
+                    
+                } else if(indicatorLayers[id]){
+                    map.removeLayer(indicatorLayers[id]);
+                    delete indicatorLayers[id];
+                    removeLegend(id);
+                    showStatusMessage(`Layer ${ind.name} deactivated.`);
+                }
+            });
+        });
+
+        timestampSelect.addEventListener("change", ()=>{
+            selectedIso=timestampSelect.value;
+            updateIndicatorLayers(selectedIso);
+        });
+
+        /** Updates active TEMPO layers to the newly selected ISO Time */
+        function updateIndicatorLayers(iso){
+            for(const id in indicatorLayers){
+                const indicator = validIndicators.find(i => i.id === id);
+                // Only update layers that are TEMPO and have an animation schedule
+                if(indicator && indicator.isTempo){ 
+                    const oldLayer=indicatorLayers[id];
+                    if(map.hasLayer(oldLayer)){
+                        map.removeLayer(oldLayer); 
+                        
+                        const newLayer=L.tileLayer(
+                            `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${id}/default/${iso}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png`,
+                            {maxZoom:9, opacity:0.8, attribution:"NASA GIBS - TEMPO"}
+                        );
+                        newLayer.addTo(map);
+                        indicatorLayers[id]=newLayer; 
+                    }
+                }
+            }
+        }
+        
+        // Animation Logic
+        startTempoAnim.addEventListener("click", ()=>{
+            if(Object.keys(indicatorLayers).filter(id => validIndicators.find(i => i.id === id)?.isTempo).length === 0){
+                showStatusMessage("First select a TEMPO layer in the 'Layers' tab to animate.", true); 
+                return;
+            }
+            
+            const i1=tempoTimes.indexOf(tempoStart.value);
+            const i2=tempoTimes.indexOf(tempoEnd.value);
+            
+            if(i1===-1||i2===-1){showStatusMessage("Select a valid time range to animate.", true); return;}
+            
+            let subset=tempoTimes.slice(Math.min(i1,i2),Math.max(i1,i2)+1);
+            if(subset.length===0){showStatusMessage("The selected time range is empty.", true); return;}
+            
+            clearInterval(tempoTimer);
+            let idx=0;
+            startTempoAnim.disabled=true;
+            stopTempoAnim.disabled=false;
+            
+            function animate(){
+                const t=subset[idx];
+                selectedIso=t;
+                // Force select update
+                timestampSelect.value = t; 
+                updateIndicatorLayers(t);
+                
+                showStatusMessage(`TEMPO Animation: ${t.replace('T', ' ').replace('Z', ' UTC')}`);
+                
+                idx++;
+                if(idx>=subset.length) idx=0; // Loop
+            }
+            
+            animate();
+            tempoTimer=setInterval(animate,1000); // 1.0 seconds per frame
+        });
+
+        stopTempoAnim.addEventListener("click", ()=>{
+            clearInterval(tempoTimer);
+            tempoTimer=null;
+            startTempoAnim.disabled=false;
+            stopTempoAnim.disabled=true;
+            showStatusMessage("TEMPO Animation stopped.");
+        });
+
+        // Toggle Indicators Panel
+        indicatorsBtn.addEventListener("click",()=>{
+            indicatorsPanel.classList.toggle('hidden');
+        });
+        
+        closeIndicators.addEventListener("click",()=>{
+            indicatorsPanel.classList.add('hidden');
+        });
+
+
+    })();
+    </script>
+</body>
+</html>

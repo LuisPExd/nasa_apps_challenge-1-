@@ -1,0 +1,326 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap');
+
+/* Colores Base - Optimizados */
+:root {
+    --color-primary: #1d4ed8; /* blue-700, más profesional */
+    --color-primary-light: #3b82f6; /* blue-500 */
+    --color-primary-dark: #1e3a8a; /* blue-900 */
+    --color-secondary-bg: #eff6ff; /* blue-50 */
+    --color-text-dark: #1f2937; /* gray-800 */
+    --color-bg-light: #f9fafb; /* gray-50 */
+}
+
+/* Estilos Globales */
+body {
+    font-family: 'Inter', sans-serif;
+    padding: 0;
+    margin: 0;
+    min-height: 100vh;
+    scroll-behavior: smooth;
+}
+
+/* ===============================
+    MAQUETACIÓN PRINCIPAL (DASHBOARD)
+    =============================== */
+#air-quality-dashboard {
+    background-color: var(--color-bg-light);
+    padding-top: 4rem; /* Más espacio */
+    padding-bottom: 4rem;
+    min-height: 100vh; 
+}
+
+.app-layout {
+    max-width: 85rem; /* Un poco más de ancho */
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    display: flex;
+    flex-direction: column; 
+    gap: 1.5rem;
+}
+
+@media (min-width: 1024px) { 
+    .app-layout {
+        flex-direction: row; 
+        height: calc(100vh - 120px);
+    }
+}
+
+.control-panel {
+    /* Estilo de la tarjeta de control más limpio y elevado */
+    background-color: white;
+    padding: 1.5rem;
+    border-radius: 1rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06); 
+    border: none;
+    overflow-y: auto;
+}
+
+@media (min-width: 1024px) {
+    .control-panel {
+        width: 350px;
+        flex-shrink: 0;
+        height: 100%;
+    }
+}
+
+.results-panel {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    height: 100%;
+    min-height: 500px;
+}
+
+/* ===============================
+    COMPONENTES UI (DASHBOARD)
+    =============================== */
+
+/* Controles */
+.section-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--color-primary-dark);
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--color-secondary-bg);
+    margin-bottom: 1rem;
+}
+
+.control-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-text-dark);
+    margin-bottom: 0.35rem;
+}
+
+.error-feedback {
+    font-size: 0.75rem;
+    margin-top: 0.25rem;
+    color: #ef4444; /* red-500 */
+}
+
+/* Inputs y Selects */
+.input-field {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #d1d5db; /* gray-300 */
+    border-radius: 0.5rem;
+    transition: all 0.15s ease;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    font-size: 0.875rem;
+}
+.input-field:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.2); 
+}
+.input-field:disabled {
+    background-color: #f9fafb;
+}
+
+/* Botones */
+.btn {
+    padding: 0.6rem 1rem; /* Más padding vertical */
+    border-radius: 0.75rem; /* Bordes más redondeados */
+    transition: background-color 0.15s ease, transform 0.1s ease, opacity 0.3s, box-shadow 0.1s ease;
+    font-weight: 700;
+    text-align: center;
+    border: none;
+    font-size: 0.875rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.btn-primary {
+    background-color: var(--color-primary);
+    color: white;
+}
+.btn-primary:hover:not(:disabled) {
+    background-color: var(--color-primary-light);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn-secondary {
+    background-color: var(--color-secondary-bg);
+    color: var(--color-primary-dark);
+    border: 1px solid var(--color-primary);
+}
+.btn-secondary:hover:not(:disabled) {
+    background-color: #dbeafe; /* blue-100 */
+    transform: translateY(-1px);
+}
+
+.btn-tertiary {
+    background-color: transparent;
+    color: var(--color-primary);
+    border: 1px solid var(--color-primary-light);
+}
+.btn-tertiary:hover:not(:disabled) {
+    background-color: var(--color-secondary-bg);
+}
+
+
+/* Resultado Última Medición (Siempre visible) */
+.latest-result-card {
+    background: linear-gradient(135deg, white 70%, var(--color-secondary-bg));
+    padding: 1.5rem;
+    border-radius: 1rem;
+    border-left: 6px solid var(--color-primary);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+    flex-shrink: 0;
+}
+
+.latest-result-card #latest-value {
+    color: var(--color-primary-dark);
+    font-size: 2.5rem;
+    font-weight: 900;
+}
+
+/* Gráfico */
+.card {
+    background-color: white;
+    padding: 1.25rem;
+    border-radius: 1rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.06);
+    border: 1px solid #f3f4f6; 
+}
+.chart-card {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+    border-radius: 1rem;
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 400px;
+}
+
+.chart-wrapper {
+    flex-grow: 1;
+    min-height: 300px; 
+}
+
+/* Precarga y Error */
+.absolute-status {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 100;
+    background: white;
+    border-radius: 0.75rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+.error-box {
+    background-color: #fee2e2; 
+    border-left: 4px solid #ef4444; 
+    color: #b91c1c; 
+    padding: 1rem;
+    border-radius: 0.375rem;
+    text-align: left;
+}
+
+/* Spinner de Carga */
+.spinner {
+    display: inline-block;
+    width: 2.5rem;
+    height: 2.5rem;
+    border: 4px solid rgba(29, 78, 216, 0.2);
+    border-top: 4px solid var(--color-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* JSON Debug */
+.debug-panel {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background-color: #f8fafc;
+    border-radius: 0.5rem;
+    border: 1px solid #e2e8f0;
+}
+.json-pre {
+    background-color: #1f2937;
+    color: #10b981; 
+    padding: 0.75rem;
+    border-radius: 0.5rem;
+    overflow: auto;
+    max-height: 200px;
+    font-size: 0.7rem;
+    white-space: pre-wrap;
+}
+
+
+/* ===============================
+    MODAL FLOTANTE (TABLA)
+    =============================== */
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.6); 
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background-color: white;
+    padding: 1.5rem;
+    border-radius: 1rem;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+    max-width: 95%;
+    width: 800px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    animation: fadeInScale 0.3s ease-out; /* Animación de entrada */
+}
+
+@keyframes fadeInScale {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* Tabla de Datos dentro del Modal */
+.table-header {
+    background-color: var(--color-secondary-bg);
+}
+.table-header-cell {
+    padding: 0.75rem 1rem; /* Más padding */
+    text-align: left;
+    font-size: 0.75rem; 
+    font-weight: 700;
+    color: var(--color-primary-dark);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.min-w-full {
+    min-width: 100%;
+}
+
+.bg-white.divide-y.divide-gray-200 tr td {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+/* Utilidades */
+.hidden {
+    display: none !important;
+}

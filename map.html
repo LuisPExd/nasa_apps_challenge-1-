@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Mapa Satélite / Calles + Comparación + Indicadores</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height:100%; margin:0; padding:0; }
+    .controls {
+      position:absolute; top:10px; right:10px;
+      z-index:1000; display:flex; flex-direction:column; gap:8px;
+    }
+    .custom-button, select {
+      background:white; border:1px solid #ccc; border-radius:6px;
+      font-family:sans-serif; padding:6px 10px; cursor:pointer;
+      font-size:14px; box-shadow:0 1px 4px rgba(0,0,0,0.3);
+    }
+    .compare-panel, .indicators-panel {
+      position:absolute; top:60px; background:white; border:1px solid #ccc;
+      border-radius:8px; padding:10px; box-shadow:0 2px 6px rgba(0,0,0,0.3);
+      font-family:sans-serif; z-index:1100;
+    }
+    .compare-panel { right:10px; width:230px; display:none; }
+    .indicators-panel { left:10px; width:340px; max-height:80%; overflow-y:auto; display:none; }
+    .compare-close, .indicators-close {
+      position:absolute; top:5px; right:8px; background:#eee; border:none;
+      border-radius:50%; width:22px; height:22px; cursor:pointer; font-weight:bold;
+    }
+    .indicator-item { margin-bottom:10px; }
+    .legend { font-size:12px; color:#555; margin-left:20px; }
+    .date-label {
+      position:absolute; bottom:15px; right:15px; background:rgba(0,0,0,0.6);
+      color:white; padding:6px 12px; border-radius:6px; font-family:sans-serif;
+      font-size:14px; display:none; z-index:1200;
+    }
+    .legends-container {
+      border-top:1px solid #ccc; margin-top:10px; padding-top:6px;
+    }
+    .legend-item {
+      text-align:center; margin-bottom:10px;
+    }
+    .legend-item img {
+      width:100%; max-width:320px;
+      border:1px solid #ddd; border-radius:6px;
+      background:white;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="controls">
+    <input type="date" id="datePicker" class="custom-button" />
+    <button class="custom-button" id="toggleBtn">Ver Calles</button>
+    <button class="custom-button" id="compareBtn">Comparar Fechas</button>
+    <button class="custom-button" id="indicatorsBtn">Gases (TEMPO)</button>
+  </div>
+
+  <div class="compare-panel" id="comparePanel">
+    <button class="compare-close" id="closeCompare">×</button>
+    <h4>Comparación</h4>
+    <label>Fecha inicial:</label>
+    <input type="date" id="startDate" style="width:100%; margin-bottom:8px;">
+    <label>Fecha final:</label>
+    <input type="date" id="endDate" style="width:100%; margin-bottom:8px;">
+    <button id="startCompare" class="custom-button">Iniciar animación</button>
+    <button id="stopCompare" class="custom-button">Detener</button>
+  </div>
+
+  <div class="indicators-panel" id="indicatorsPanel">
+    <button class="indicators-close" id="closeIndicators">×</button>
+    <h4>Indicadores de aire (TEMPO)</h4>
+
+    <label for="tempoTimestamp" style="display:block; font-size:13px; margin-bottom:4px;">🕒 Seleccionar tiempo disponible:</label>
+    <select id="tempoTimestamp" style="width:100%; margin-bottom:10px;">
+      <option value="">Selecciona un indicador primero</option>
+    </select>
+
+    <div id="indicatorsList"></div>
+
+    <hr>
+    <h5 style="margin:8px 0 4px;">Animación de gases</h5>
+    <label>Inicio:</label>
+    <select id="tempoStart" style="width:100%; margin-bottom:4px;"></select>
+    <label>Fin:</label>
+    <select id="tempoEnd" style="width:100%; margin-bottom:8px;"></select>
+    <button id="startTempoAnim" class="custom-button">Iniciar animación</button>
+    <button id="stopTempoAnim" class="custom-button" disabled>Detener</button>
+
+    <div style="font-size:12px; color:#444; margin-top:8px;">
+      Las fechas se obtienen automáticamente del servidor GIBS (NASA).  
+      Si no hay datos disponibles, puede mostrarse vacío.
+    </div>
+
+    <div class="legends-container" id="legendsContainer"></div>
+  </div>
+
+  <div class="date-label" id="dateLabel"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+  (async function(){
+    function formatLocalDate(d){
+      const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`;
+    }
+
+    const map=L.map("map",{center:[-9.2,-75],zoom:4});
+    const todayStr=formatLocalDate(new Date());
+    const hour=new Date().getHours();
+
+    function createLayers(dateStr){
+      const modis=L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${dateStr}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpeg`,
+        {maxZoom:9,attribution:"NASA MODIS Terra"});
+      const viirs=L.tileLayer(`https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_DayNightBand_At_Sensor_Radiance/default/${dateStr}/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png`,
+        {maxZoom:8,attribution:"NASA VIIRS"});
+      return {modis,viirs};
+    }
+
+    let {modis,viirs}=createLayers(todayStr);
+    const streets=L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19});
+    let satelliteLayer=(hour>=6&&hour<18)?modis:viirs;
+    satelliteLayer.addTo(map);
+    let showingStreets=false;
+
+    const btn=document.getElementById("toggleBtn");
+    const datePicker=document.getElementById("datePicker");
+    datePicker.value=todayStr; datePicker.max=todayStr;
+
+    async function fadeToNewLayer(dateStr){
+      const newLayers=createLayers(dateStr);
+      const nextLayer=(hour>=6&&hour<18)?newLayers.modis:newLayers.viirs;
+      map.removeLayer(satelliteLayer);
+      nextLayer.addTo(map);
+      satelliteLayer=nextLayer;
+      updateIndicatorLayers(selectedIso);
+    }
+
+    btn.addEventListener("click",()=>{
+      if(showingStreets){
+        map.removeLayer(streets); map.addLayer(satelliteLayer);
+        btn.textContent="Ver Calles"; showingStreets=false;
+      } else {
+        map.removeLayer(satelliteLayer); map.addLayer(streets);
+        btn.textContent="Ver Satélite"; showingStreets=true;
+      }
+    });
+    datePicker.addEventListener("change",()=>{ if(datePicker.value) fadeToNewLayer(datePicker.value); });
+
+    const indicatorsBtn=document.getElementById("indicatorsBtn");
+    const indicatorsPanel=document.getElementById("indicatorsPanel");
+    const closeIndicators=document.getElementById("closeIndicators");
+    const timestampSelect=document.getElementById("tempoTimestamp");
+    const tempoStart=document.getElementById("tempoStart");
+    const tempoEnd=document.getElementById("tempoEnd");
+    const startTempoAnim=document.getElementById("startTempoAnim");
+    const stopTempoAnim=document.getElementById("stopTempoAnim");
+    const indicatorsList=document.getElementById("indicatorsList");
+    const legendsContainer=document.getElementById("legendsContainer");
+    const dateLabel=document.getElementById("dateLabel");
+
+    const validIndicators=[
+      { id:"TEMPO_L3_Formaldehyde_Vertical_Column", name:"Formaldehyde (L3, Vertical Column)", legend:"https://gibs.earthdata.nasa.gov/legends/TEMPO_HCHO_Vertical_Column_H.svg" },
+      { id:"TEMPO_L3_NO2_Vertical_Column_Troposphere", name:"NO₂ (L3, Troposphere Column)", legend:"https://gibs.earthdata.nasa.gov/legends/TEMPO_NO2_Vertical_Column_Troposphere_H.svg" },
+      { id:"TEMPO_L3_Ozone_Profile_Troposphere_Column", name:"O₃ (L3, Troposphere Column)", legend:"https://gibs.earthdata.nasa.gov/legends/TEMPO_Troposphere_Ozone_Column_H.svg" },
+      { id:"TEMPO_L3_Cloud_Cloud_Pressure_Total", name:"Clouds (L3, Cloud Pressure Total)", legend:"https://gibs.earthdata.nasa.gov/legends/TEMPO_Cloud_Cloud_Pressure_Total_H.svg" }
+    ];
+
+    let indicatorLayers={};
+    let selectedIso=null;
+    let tempoTimes=[];
+    let tempoTimer=null;
+
+    async function loadTimesForLayer(layerId){
+      try {
+        const res=await fetch("https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/1.0.0/WMTSCapabilities.xml");
+        const text=await res.text();
+        const xml=new DOMParser().parseFromString(text,"application/xml");
+        const node=[...xml.querySelectorAll("Layer")].find(l=>{
+          const idNode=l.querySelector("ows\\:Identifier, Identifier");
+          return idNode && idNode.textContent.trim()===layerId;
+        });
+        if(!node) return [];
+        const dim=node.querySelector("Dimension, ows\\:Dimension");
+        if(!dim) return [];
+        const values=[...dim.querySelectorAll("Value")].map(v=>v.textContent.match(/^([^/]+)/)?.[1]).filter(Boolean);
+        return values.reverse();
+      } catch(e){console.error(e); return [];}
+    }
+
+    async function updateTimestampSelectorFor(layerId){
+      timestampSelect.innerHTML='<option>Cargando...</option>';
+      tempoStart.innerHTML="";
+      tempoEnd.innerHTML="";
+      const times=await loadTimesForLayer(layerId);
+      tempoTimes=times;
+      timestampSelect.innerHTML="";
+      if(times.length===0){
+        timestampSelect.innerHTML='<option value="">Sin tiempos disponibles</option>';
+        return;
+      }
+      times.forEach(t=>{
+        const o=document.createElement("option");
+        o.value=t; o.textContent=t; timestampSelect.appendChild(o);
+      });
+      selectedIso=times[0];
+      timestampSelect.value=selectedIso;
+      times.forEach(t=>{
+        const a=document.createElement("option");
+        a.value=t; a.textContent=t;
+        tempoStart.appendChild(a.cloneNode(true));
+        tempoEnd.appendChild(a);
+      });
+      tempoStart.value=times[times.length-2]||times[0];
+      tempoEnd.value=times[0];
+    }
+
+    function addLegend(id,url,name){
+      const div=document.createElement("div");
+      div.className="legend-item";
+      div.id=`legend_${id}`;
+      div.innerHTML=`<strong>${name}</strong><br><img src="${url}" alt="${name}">`;
+      legendsContainer.appendChild(div);
+    }
+
+    function removeLegend(id){
+      const el=document.getElementById(`legend_${id}`);
+      if(el) el.remove();
+    }
+
+    validIndicators.forEach(ind=>{
+      const div=document.createElement("div");
+      div.className="indicator-item";
+      div.innerHTML=`<label><input type="checkbox" id="${ind.id}"> ${ind.name}</label>
+                     <div class="legend">🛰️ ${ind.id}</div>`;
+      indicatorsList.appendChild(div);
+      const checkbox=div.querySelector("input");
+      checkbox.addEventListener("change",async e=>{
+        const id=ind.id;
+        if(e.target.checked){
+          await updateTimestampSelectorFor(ind.id);
+          if(!selectedIso){alert("No hay tiempos disponibles para esta capa."); return;}
+          indicatorLayers[id]=L.tileLayer(
+            `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${id}/default/${selectedIso}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png`,
+            {maxZoom:9,opacity:0.8,attribution:"NASA GIBS"}
+          ).addTo(map);
+          addLegend(id,ind.legend,ind.name);
+        } else if(indicatorLayers[id]){
+          map.removeLayer(indicatorLayers[id]); delete indicatorLayers[id];
+          removeLegend(id);
+        }
+      });
+    });
+
+    timestampSelect.addEventListener("change",()=>{
+      selectedIso=timestampSelect.value;
+      updateIndicatorLayers(selectedIso);
+    });
+
+    function updateIndicatorLayers(iso){
+      for(const id in indicatorLayers){
+        const vis=map.hasLayer(indicatorLayers[id]);
+        map.removeLayer(indicatorLayers[id]);
+        indicatorLayers[id]=L.tileLayer(
+          `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${id}/default/${iso}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png`,
+          {maxZoom:9,opacity:0.8,attribution:"NASA GIBS"}
+        );
+        if(vis) indicatorLayers[id].addTo(map);
+      }
+    }
+
+    startTempoAnim.addEventListener("click",()=>{
+      if(!tempoTimes.length){alert("Selecciona un gas primero."); return;}
+      const i1=tempoTimes.indexOf(tempoStart.value);
+      const i2=tempoTimes.indexOf(tempoEnd.value);
+      if(i1===-1||i2===-1){alert("Selecciona fechas válidas."); return;}
+      const subset=tempoTimes.slice(Math.min(i1,i2),Math.max(i1,i2)+1);
+      if(subset.length===0){alert("Rango vacío."); return;}
+      let idx=0;
+      startTempoAnim.disabled=true; stopTempoAnim.disabled=false;
+      dateLabel.style.display="block";
+      function animate(){
+        const t=subset[idx];
+        selectedIso=t; updateIndicatorLayers(t);
+        dateLabel.textContent=`🕒 ${t}`;
+        idx=(idx+1)%subset.length;
+      }
+      animate();
+      tempoTimer=setInterval(animate,2200);
+    });
+
+    stopTempoAnim.addEventListener("click",()=>{
+      clearInterval(tempoTimer);
+      tempoTimer=null;
+      dateLabel.style.display="none";
+      startTempoAnim.disabled=false; stopTempoAnim.disabled=true;
+    });
+
+    indicatorsBtn.addEventListener("click",()=>{
+      indicatorsPanel.style.display=indicatorsPanel.style.display==="none"?"block":"none";
+    });
+    closeIndicators.addEventListener("click",()=>{indicatorsPanel.style.display="none";});
+  })();
+  </script>
+</body>
+</html>
+
+
